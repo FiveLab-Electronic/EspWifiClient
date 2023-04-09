@@ -20,6 +20,11 @@ enum EspWifiClientNetworkMode {
     EspWifiClientNetworkMode_WPA_WPA2_PSK = 4
 };
 
+enum EspWifiClientNetworkState {
+    EspWifiClientNetworkState_Connected = (1 << 0),
+    EspWifiClientNetworkState_GotIp = (1 << 1)
+};
+
 struct EspWifiClientNetwork {
     EspWifiClientNetworkMode mode;
     const char *ssid;
@@ -92,8 +97,20 @@ public:
     AtStreamResult connect(const char *ssid, const char *password);
 
     /**
+     * Send command for get local IP and MAC.
+     */
+    AtStreamResult localNetInfo();
+
+    /**
      * Send command for use specific Domain Name Server.
      * For test and production you can use 8.8.8.8 (global NS).
      */
     AtStreamResult useDns(const char *dns);
+
+protected:
+    uint8_t _networkState = 0;
+
+    void receiveNotRelatedLine() override;
+
+    void processResponseLine(const char *buffer, size_t size);
 };

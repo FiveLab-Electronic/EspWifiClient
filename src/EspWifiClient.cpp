@@ -11,7 +11,22 @@ bool EspWifiClient::tick() {
         AT_STREAM_CLEAR_BIT(_flags, EspWifiClientFlags_Connect);
 
         // Process connect.
-        Serial.println("PROCESS CONNECT");
+        size_t bufferSize = strlen(_responseData.buffer);
+        size_t startLinePosition = 0;
+
+        for (size_t i = 0; i < bufferSize; i++) {
+            if (_responseData.buffer[i] == '\n') {
+                // Found line separator. Check.
+                size_t lineSize = i - startLinePosition;
+
+                if (lineSize) {
+                    processResponseLine(&_responseData.buffer[startLinePosition], i - startLinePosition);
+                }
+
+                startLinePosition = i + 1;
+            }
+        }
+
         return true;
     }
 
@@ -22,7 +37,7 @@ bool EspWifiClient::ready() {
     bool result = AtStream::ready();
 
     if (result) {
-        if (_flags * AtStreamFlags_ReceivedResponse && _flags & EspWifiClientFlags_Connect) {
+        if (_flags & AtStreamFlags_ReceivedResponse && _flags & EspWifiClientFlags_Connect) {
             // Must set flags for connected or not.
             return false;
         }
@@ -44,6 +59,8 @@ AtStreamResult EspWifiClient::restore() {
 }
 
 AtStreamResult EspWifiClient::disconnect() {
+    _networkState = _networkState & ~(EspWifiClientNetworkState_Connected | EspWifiClientNetworkState_GotIp);
+
     return commandExecute("CWQAP");
 }
 
@@ -154,10 +171,39 @@ AtStreamResult EspWifiClient::connect(const char *ssid, const char *password) {
     return commandExecute("CWJAP", arguments, 2);
 }
 
+AtStreamResult EspWifiClient::localNetInfo() {
+    if (!(_networkState & EspWifiClientNetworkState_Connected) || !(_networkState & EspWifiClientNetworkState_GotIp)) {
+        // Not connected or not received IP address.
+        return AtStreamResult_WrongCommand;
+    }
+
+    return commandExecute("CIFSR");
+}
+
 AtStreamResult EspWifiClient::useDns(const char *dns) {
     AtStreamArgument arguments[1] = {
         {AtStreamArgumentType_String, dns}
     };
 
     return commandExecute("CIPDOMAIN", arguments, 1);
+}
+
+void EspWifiClient::receiveNotRelatedLine() {
+    processResponseLine(_responseLine.buffer, strlen(_responseLine.buffer));
+}
+
+void EspWifiClient::processResponseLine(const char *buffer, size_t size) {
+    if (size == 15 && memcmp("WIFI DISCONNECT", buffer, size) == 0) {
+        _networkState = _networkState & ~(EspWifiClientNetworkState_Connected | EspWifiClientNetworkState_GotIp);
+    }
+
+    if (size == 14 && memcmp("WIFI CONNECTED", buffer, size) == 0) {
+        _networkState = _networkState | EspWifiClientNetworkState_Connected;
+    }
+
+    if (size == 11 && memcmp("WIFI GOT IP", buffer, size) == 0) {
+        _networkState = _networkState | EspWifiClientNetworkState_GotIp;
+    }
+
+    // @todo Process "DHCP TIMEOUT"?
 }
